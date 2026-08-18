@@ -12,11 +12,18 @@ from typing import Any
 from redeem_api_sdk import BatchReclaimResult, ReclaimTask, RedeemClient
 
 from .ledger import AccountLedger, AccountLedgerError
-from .models import ImportJobRequest, JobSnapshot, Recover401JobRequest
+from .models import (
+    MAX_MANUAL_IMPORT_ACCOUNTS,
+    ImportJobRequest,
+    JobSnapshot,
+    ManualImportJobRequest,
+    Recover401JobRequest,
+)
 from .sub2api import (
     DownloadPayloadError,
     apply_account_delivery_metadata,
     extract_account_email,
+    extract_recovery_card_code,
     extract_sub2api_payload,
     fetch_sub2api_401_accounts,
     import_to_sub2api,
@@ -133,6 +140,18 @@ class JobManager:
         record.task = asyncio.create_task(self._run_recovery(record, request))
         return record
 
+    def create_manual_import(self, request: ManualImportJobRequest) -> JobRecord:
+        self._prune()
+        record = JobRecord(
+            id=uuid.uuid4().hex,
+            summary={"operation": "manual_import"},
+            message="JSON 导入任务已创建，等待开始",
+        )
+        record.log(f"已接收文件 {request.filename}")
+        self.jobs[record.id] = record
+        record.task = asyncio.create_task(self._run_manual_import(record, request))
+        return record
+
     def get(self, job_id: str) -> JobRecord | None:
         return self.jobs.get(job_id)
 
@@ -165,6 +184,92 @@ class JobManager:
             job.error = str(exc)
             job.log(str(exc), "error")
             job.update(status="failed", stage="failed", message="401 找回任务执行失败")
+
+    async def _run_manual_import(
+        self, job: JobRecord, request: ManualImportJobRequest
+    ) -> None:
+        try:
+            await self._execute_manual_import(job, request)
+        except Exception as exc:  # noqa: BLE001 - background jobs must always reach a terminal state
+            job.error = str(exc)
+            job.log(str(exc), "error")
+            job.update(status="failed", stage="failed", message="JSON 导入任务执行失败")
+
+    async def _execute_manual_import(
+        self, job: JobRecord, request: ManualImportJobRequest
+    ) -> None:
+        job.update(
+            status="running",
+            stage="checking",
+            progress=8,
+            message="正在解析 account.json",
+        )
+        payload = extract_sub2api_payload(request.payload)
+        accounts = payload.get("accounts", [])
+        account_count = len(accounts)
+        if account_count > MAX_MANUAL_IMPORT_ACCOUNTS:
+            raise RuntimeError(
+                f"account.json 包含 {account_count} 个账号，单次最多导入 "
+                f"{MAX_MANUAL_IMPORT_ACCOUNTS} 个"
+            )
+
+        embedded_proxies = len(payload.get("proxies", []))
+        job.summary["manual_file"] = {
+            "filename": request.filename,
+            "accounts": account_count,
+            "embedded_proxies": embedded_proxies,
+        }
+        job.log(f"文件解析完成，发现 {account_count} 个账号", "success")
+        if embedded_proxies:
+            job.log(
+                f"已忽略文件内 {embedded_proxies} 个代理定义，"
+                "账号统一使用本次选择的代理",
+                "info",
+            )
+
+        job.update(
+            stage="downloading",
+            progress=40,
+            message=f"正在整理 {account_count} 个账号",
+        )
+        target_parts = [
+            f"分组 {request.group_id}" if request.group_id else "不绑定分组"
+        ]
+        target_parts.append(f"代理 {request.proxy_id}" if request.proxy_id else "直连")
+        job.log(
+            f"开始向 Sub2API 导入 {account_count} 个账号（{'，'.join(target_parts)}）"
+        )
+        job.update(
+            stage="importing",
+            progress=70,
+            message=f"正在向 Sub2API 导入 {account_count} 个账号",
+        )
+        import_result = await import_to_sub2api(
+            base_url=str(request.sub2api_base_url).rstrip("/"),
+            token=request.sub2api_token.get_secret_value(),
+            payload=payload,
+            verify_tls=request.verify_sub2api_tls,
+            idempotency_key=f"account-import-manual-{job.id}",
+            group_id=request.group_id,
+            proxy_id=request.proxy_id,
+        )
+        job.summary["import"] = import_result
+        await self._record_manual_import_results(job, request, payload, import_result)
+
+        failed = int(import_result.get("account_failed", 0) or 0)
+        created = int(import_result.get("account_created", 0) or 0)
+        status = "partial" if failed else "succeeded"
+        job.log(
+            f"Sub2API 导入完成：成功 {created}，失败 {failed}",
+            "warning" if failed else "success",
+        )
+        job.update(
+            status=status,
+            stage="completed",
+            progress=100,
+            message=f"JSON 导入完成，成功创建 {created} 个账号"
+            + (f"，{failed} 个需检查" if failed else ""),
+        )
 
     async def _execute(self, job: JobRecord, request: ImportJobRequest) -> None:
         codes = request.card_codes
@@ -649,6 +754,52 @@ class JobManager:
                 platform=str(source.get("platform", "")),
                 message=(
                     "账号已创建"
+                    if success
+                    else str(result.get("error") or "Sub2API 创建账号失败")
+                ),
+            )
+
+    async def _record_manual_import_results(
+        self,
+        job: JobRecord,
+        request: ManualImportJobRequest,
+        payload: dict[str, Any],
+        import_result: dict[str, Any],
+    ) -> None:
+        if self.ledger is None:
+            return
+        accounts_by_name: dict[str, list[dict[str, Any]]] = {}
+        for account in payload.get("accounts", []):
+            if not isinstance(account, dict):
+                continue
+            name = str(account.get("name", "")).strip()
+            if name:
+                accounts_by_name.setdefault(name.casefold(), []).append(account)
+
+        for result in import_result.get("results", []) or []:
+            if not isinstance(result, dict):
+                continue
+            name = str(result.get("name", "")).strip()
+            sources = accounts_by_name.get(name.casefold(), [])
+            source = sources.pop(0) if sources else None
+            if source is None:
+                job.log(f"本地账本无法匹配 Sub2API 返回账号：{name}", "warning")
+                continue
+            success = bool(result.get("success", False))
+            account_id = result.get("id")
+            await self._record_ledger_event(
+                job,
+                operation="manual_import",
+                status="success" if success else "failed",
+                sub2api_base_url=str(request.sub2api_base_url),
+                sub2api_account_id=(
+                    account_id if isinstance(account_id, int) else None
+                ),
+                email=str(extract_account_email(source) or name),
+                card_code=str(extract_recovery_card_code(source) or ""),
+                platform=str(source.get("platform", "")),
+                message=(
+                    f"账号已从 {request.filename} 创建"
                     if success
                     else str(result.get("error") or "Sub2API 创建账号失败")
                 ),

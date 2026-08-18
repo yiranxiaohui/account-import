@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr, field_validator
 
 CARD_CODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$")
+MAX_MANUAL_IMPORT_BYTES = 5 * 1024 * 1024
+MAX_MANUAL_IMPORT_ACCOUNTS = 1000
 
 
 class JobInputBase(BaseModel):
@@ -44,6 +46,34 @@ class ImportJobRequest(JobInputBase):
     verify_sub2api_tls: bool = True
     group_id: int | None = Field(default=None, gt=0)
     proxy_id: int | None = Field(default=None, gt=0)
+
+
+class StartManualImportJobRequest(BaseModel):
+    """Public request for importing an account.json payload directly."""
+
+    filename: str = Field(min_length=1, max_length=255)
+    payload: dict[str, Any] | list[Any]
+    proxy_id: int | None = Field(default=None, gt=0)
+
+    @field_validator("filename")
+    @classmethod
+    def normalize_filename(cls, value: str) -> str:
+        normalized = value.replace("\\", "/").rsplit("/", 1)[-1].strip()
+        normalized = "".join(
+            character for character in normalized if character.isprintable()
+        )
+        if not normalized:
+            raise ValueError("文件名不能为空")
+        return normalized
+
+
+class ManualImportJobRequest(StartManualImportJobRequest):
+    """Resolved manual import request containing persisted Sub2API credentials."""
+
+    sub2api_base_url: AnyHttpUrl
+    sub2api_token: SecretStr = Field(min_length=1)
+    verify_sub2api_tls: bool = True
+    group_id: int | None = Field(default=None, gt=0)
 
 
 class Sub2APIConfigUpdate(BaseModel):
@@ -116,7 +146,7 @@ class LocalAccountRecord(BaseModel):
     email: str
     card_code: str
     platform: str
-    last_operation: Literal["import", "recover_401"]
+    last_operation: Literal["import", "manual_import", "recover_401"]
     last_status: Literal["success", "failed"]
     last_job_id: str
     last_message: str
