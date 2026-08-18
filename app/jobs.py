@@ -105,11 +105,11 @@ class JobManager:
                 or os.getenv("TEAM_IMPORT_MAX_WAIT", "600")
             ),
         )
-        self.health_timeout = max(
-            1.0,
+        self.empty_result_retry_delay = max(
+            0.0,
             float(
-                os.getenv("ACCOUNT_IMPORT_HEALTH_TIMEOUT")
-                or os.getenv("TEAM_IMPORT_HEALTH_TIMEOUT", "15")
+                os.getenv("ACCOUNT_IMPORT_EMPTY_RESULT_RETRY_DELAY")
+                or os.getenv("TEAM_IMPORT_EMPTY_RESULT_RETRY_DELAY", "3")
             ),
         )
 
@@ -173,26 +173,8 @@ class JobManager:
             status="running",
             stage="checking",
             progress=4,
-            message=f"正在快速检查兑换码额度（最多 {self.health_timeout:g} 秒）",
+            message="正在验证兑换码并提交任务",
         )
-
-        health = await asyncio.to_thread(
-            client.health_check, codes, self.health_timeout
-        )
-        if health.ok:
-            job.summary["health"] = {
-                "total": health.total,
-                "healthy": health.healthy,
-                "need_reclaim": health.need_reclaim,
-                "cannot_reclaim": health.cannot_reclaim,
-                "unknown": health.unknown,
-            }
-            job.log(
-                f"额度检查完成：共 {health.total} 个账号，正常 {health.healthy}，需找回 {health.need_reclaim}",
-                "success",
-            )
-        else:
-            job.log(f"额度预检失败，将继续尝试兑换：{health.error}", "warning")
 
         batches = chunked(codes, 20)
         all_downloadables: list[ReclaimTask] = []
@@ -210,6 +192,23 @@ class JobManager:
                 raise RuntimeError(
                     f"第 {batch_no} 批提交失败：{initial.error or '未知错误'}"
                 )
+            if self._is_empty_valid_batch(initial):
+                job.log(
+                    f"第 {batch_no} 批兑换码有效但暂未返回关联账号，"
+                    f"{self.empty_result_retry_delay:g} 秒后自动重试",
+                    "warning",
+                )
+                await asyncio.sleep(self.empty_result_retry_delay)
+                retried = await asyncio.to_thread(
+                    client.batch_reclaim, batch, request.mode
+                )
+                if retried.ok:
+                    initial = retried
+                else:
+                    job.log(
+                        f"第 {batch_no} 批自动重试失败：{retried.error or '未知错误'}",
+                        "warning",
+                    )
 
             final = await self._wait_for_batch(
                 job, client, batch, initial, index, len(batches)
@@ -250,6 +249,8 @@ class JobManager:
             "distinct_resources": sum(
                 item.distinct_resources for item in final_results
             ),
+            "scanned_resources": sum(item.scanned_resources for item in final_results),
+            "skipped_not_401": sum(item.skipped_not_401 for item in final_results),
             "done": sum(item.done for item in final_results),
             "failed": sum(item.failed for item in final_results),
             "unreclaimable": sum(item.unreclaimable for item in final_results),
@@ -729,6 +730,23 @@ class JobManager:
                 result = refreshed
         return result
 
+    @staticmethod
+    def _is_empty_valid_batch(result: BatchReclaimResult) -> bool:
+        return (
+            result.ok
+            and result.valid_cards > 0
+            and result.distinct_resources == 0
+            and not result.all_tasks
+            and result.queued == 0
+            and result.already_running == 0
+            and result.done == 0
+            and result.failed == 0
+            and result.unreclaimable == 0
+            and result.not_owned == 0
+            and result.skipped == 0
+            and result.skipped_not_401 == 0
+        )
+
     @classmethod
     def _redeem_issues(
         cls,
@@ -756,6 +774,14 @@ class JobManager:
             if invalid_without_detail:
                 issue_count += invalid_without_detail
                 issues["兑换服务未识别为有效兑换码"] += invalid_without_detail
+
+            if cls._is_empty_valid_batch(result) and card_errors == 0:
+                issue_count += result.valid_cards
+                issues["兑换码有效，但兑换服务未返回关联账号"] += result.valid_cards
+
+            if result.skipped_not_401 and not result.all_tasks:
+                issue_count += result.skipped_not_401
+                issues["账号当前不是 401，无需找回"] += result.skipped_not_401
 
             for task in result.all_tasks:
                 message = ""

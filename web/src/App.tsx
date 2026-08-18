@@ -414,6 +414,7 @@ function App() {
   const importedCount = Number(imported?.account_created || 0)
   const redeemIssueCount = Number(redeem?.issue_count || 0)
     || Number(redeem?.failed || 0) + Number(redeem?.unreclaimable || 0)
+  const validatedCount = Number(redeem?.valid_cards || health?.total || 0)
   const failedCount = Number(imported?.account_failed || 0)
     + Number(download?.failed || 0)
     + redeemIssueCount
@@ -854,7 +855,7 @@ function App() {
                     </>
                   ) : (
                     <>
-                      <StatCard label="检测账号" value={Number(health?.total || 0)} />
+                      <StatCard label="有效卡密" value={validatedCount} />
                       <StatCard label="下载账号" value={Number(download?.accounts || 0)} accent="#70cfff" />
                       <StatCard label="成功导入" value={importedCount} accent="#5de3bb" />
                       <StatCard label="需检查" value={failedCount} accent={failedCount ? '#ffb86b' : undefined} />
