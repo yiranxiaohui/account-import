@@ -85,6 +85,20 @@ ACCOUNT_IMPORT_DATABASE_FILE=/secure/path/account-import.db \
 
 前端“本地账号记录”区域会显示最近更新的账号，完整分页数据可通过 `GET /api/records/accounts` 读取。任务进度本身仍保存在内存中，服务重启后会清空，但 SQLite 账号记录不会丢失。
 
+## Docker
+
+GitHub Actions 会在 `main` 分支或 `v*` 标签推送时构建镜像，并发布到 GitHub Container Registry：
+
+```bash
+docker pull ghcr.io/yiranxiaohui/account-import:latest
+docker run --name account-import \
+  -p 8000:8000 \
+  -v account-import-data:/app/data \
+  ghcr.io/yiranxiaohui/account-import:latest
+```
+
+打开 `http://localhost:8000`。持久化配置和本地账号记录保存在 `/app/data`，升级或重建容器时应继续挂载同一个数据卷。
+
 ## 检查
 
 ```bash
