@@ -90,9 +90,7 @@ async def test_import_job_uses_proxy_selected_for_that_request(tmp_path, monkeyp
         return JobRecord(id="job-1")
 
     monkeypatch.setattr(manager, "create", fake_create)
-    transport = httpx.ASGITransport(
-        app=create_app(manager=manager, config_store=store)
-    )
+    transport = httpx.ASGITransport(app=create_app(manager=manager, config_store=store))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
             "/api/jobs",
