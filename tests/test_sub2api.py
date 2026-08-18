@@ -198,7 +198,7 @@ async def test_batch_create_sends_group_proxy_email_name_and_card_note(monkeypat
     assert account["notes"] == "RCL-AAAA-BBBB"
     assert account["group_ids"] == [7]
     assert account["proxy_id"] == 9
-    assert account["concurrency"] == 5
+    assert account["concurrency"] == 10
     assert result["account_created"] == 1
     assert result["results"] == [
         {

@@ -19,7 +19,7 @@ EMAIL_SEARCH_PATTERN = re.compile(
 CARD_CODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$")
 HTTP_401_PATTERN = re.compile(r"(?<!\d)401(?!\d)")
 ADMIN_API_KEY_PATTERN = re.compile(r"^admin-[0-9a-f]{64}$", re.IGNORECASE)
-DEFAULT_ACCOUNT_CONCURRENCY = 5
+DEFAULT_ACCOUNT_CONCURRENCY = 10
 
 
 class DownloadPayloadError(ValueError):
