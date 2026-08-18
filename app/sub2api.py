@@ -19,6 +19,7 @@ EMAIL_SEARCH_PATTERN = re.compile(
 CARD_CODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$")
 HTTP_401_PATTERN = re.compile(r"(?<!\d)401(?!\d)")
 ADMIN_API_KEY_PATTERN = re.compile(r"^admin-[0-9a-f]{64}$", re.IGNORECASE)
+DEFAULT_ACCOUNT_CONCURRENCY = 5
 
 
 class DownloadPayloadError(ValueError):
@@ -59,7 +60,7 @@ def _normalize_account(account: dict[str, Any], index: int) -> dict[str, Any]:
         email = str(credentials.get("email", "")).strip()
         normalized["name"] = email or f"兑换账号-{index + 1}"
 
-    normalized.setdefault("concurrency", 1)
+    normalized.setdefault("concurrency", DEFAULT_ACCOUNT_CONCURRENCY)
     normalized.setdefault("priority", 0)
     normalized.setdefault("extra", {})
     return normalized
@@ -513,7 +514,7 @@ def _account_create_payload(
         "credentials": account["credentials"],
         "extra": account.get("extra") or {},
         "proxy_id": proxy_id,
-        "concurrency": account.get("concurrency", 1),
+        "concurrency": account.get("concurrency", DEFAULT_ACCOUNT_CONCURRENCY),
         "priority": account.get("priority", 0),
         "group_ids": [group_id] if group_id is not None else [],
     }
