@@ -8,11 +8,12 @@ export interface JobEvent {
 }
 
 export interface ImportSummary {
-  operation?: 'recover_401'
+  operation?: 'manual_import' | 'recover_401'
   health?: Record<string, unknown>
   redeem?: Record<string, unknown>
   download?: Record<string, unknown>
   import?: Record<string, unknown>
+  manual_file?: Record<string, unknown>
   scan?: Record<string, unknown>
   recovery?: Record<string, unknown>
 }
@@ -34,6 +35,12 @@ export interface ImportJobRequest {
   redeem_base_url: string
   card_codes: string[]
   mode: 'all' | '401'
+  proxy_id?: number | null
+}
+
+export interface ManualImportJobRequest {
+  filename: string
+  payload: unknown
   proxy_id?: number | null
 }
 
@@ -105,7 +112,7 @@ export interface LocalAccountRecord {
   email: string
   card_code: string
   platform: string
-  last_operation: 'import' | 'recover_401'
+  last_operation: 'import' | 'manual_import' | 'recover_401'
   last_status: 'success' | 'failed'
   last_job_id: string
   last_message: string

@@ -37,7 +37,7 @@ class AccountLedger:
     def record(
         self,
         *,
-        operation: Literal["import", "recover_401"],
+        operation: Literal["import", "manual_import", "recover_401"],
         status: Literal["success", "failed"],
         job_id: str,
         sub2api_base_url: str,

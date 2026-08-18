@@ -4,7 +4,7 @@ import pytest
 
 from app.jobs import JobManager
 from app.ledger import AccountLedger
-from app.models import ImportJobRequest, Recover401JobRequest
+from app.models import ImportJobRequest, ManualImportJobRequest, Recover401JobRequest
 from redeem_api_sdk import BatchReclaimResult, HealthCheckResult, ReclaimTask
 
 
@@ -108,6 +108,98 @@ async def test_job_runs_the_full_download_and_import_pipeline(monkeypatch, tmp_p
     assert local_records["total"] == 1
     assert local_records["items"][0]["sub2api_account_id"] == 101
     assert local_records["items"][0]["card_code"] == "RCL-AAAA-BBBB"
+
+
+@pytest.mark.asyncio
+async def test_manual_json_job_imports_with_selected_proxy_and_records_account(
+    monkeypatch, tmp_path
+):
+    async def fake_import(**kwargs):
+        assert kwargs["token"] == "admin-token"
+        assert kwargs["group_id"] == 17
+        assert kwargs["proxy_id"] == 23
+        assert kwargs["payload"]["proxies"] == [
+            {"name": "embedded-proxy", "host": "ignored.example.com"}
+        ]
+        return {
+            "proxy_created": 0,
+            "proxy_reused": 0,
+            "proxy_failed": 0,
+            "account_created": 1,
+            "account_failed": 0,
+            "results": [
+                {
+                    "id": 202,
+                    "name": "owner@example.com",
+                    "success": True,
+                    "error": "",
+                }
+            ],
+        }
+
+    monkeypatch.setattr("app.jobs.import_to_sub2api", fake_import)
+    ledger = AccountLedger(tmp_path / "account-import.db")
+    manager = JobManager(ledger=ledger)
+    request = ManualImportJobRequest(
+        filename="account.json",
+        payload={
+            "proxies": [{"name": "embedded-proxy", "host": "ignored.example.com"}],
+            "accounts": [
+                {
+                    "name": "owner@example.com",
+                    "notes": "RCL-MANUAL-TEST",
+                    "platform": "openai",
+                    "type": "oauth",
+                    "credentials": {
+                        "access_token": "secret",
+                        "email": "owner@example.com",
+                    },
+                }
+            ],
+        },
+        sub2api_base_url="http://sub2api.example.com",
+        sub2api_token="admin-token",
+        group_id=17,
+        proxy_id=23,
+    )
+
+    record = manager.create_manual_import(request)
+    assert record.task is not None
+    await record.task
+
+    assert record.status == "succeeded"
+    assert record.summary["operation"] == "manual_import"
+    assert record.summary["manual_file"] == {
+        "filename": "account.json",
+        "accounts": 1,
+        "embedded_proxies": 1,
+    }
+    assert any(
+        "已忽略文件内 1 个代理定义" in event["message"] for event in record.events
+    )
+    local_records = ledger.list_accounts()
+    assert local_records["total"] == 1
+    assert local_records["items"][0]["last_operation"] == "manual_import"
+    assert local_records["items"][0]["card_code"] == "RCL-MANUAL-TEST"
+
+
+@pytest.mark.asyncio
+async def test_manual_json_job_reports_invalid_account_payload():
+    manager = JobManager()
+    request = ManualImportJobRequest(
+        filename="account.json",
+        payload={"unexpected": True},
+        sub2api_base_url="http://sub2api.example.com",
+        sub2api_token="admin-token",
+    )
+
+    record = manager.create_manual_import(request)
+    assert record.task is not None
+    await record.task
+
+    assert record.status == "failed"
+    assert record.stage == "failed"
+    assert "accounts" in (record.error or "")
 
 
 @pytest.mark.asyncio

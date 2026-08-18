@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -15,13 +16,16 @@ from .config_store import ConfigStore, ConfigStoreError
 from .jobs import JobManager
 from .ledger import AccountLedger, AccountLedgerError
 from .models import (
+    MAX_MANUAL_IMPORT_BYTES,
     CreateJobResponse,
     HealthResponse,
     ImportJobRequest,
     JobSnapshot,
     LocalAccountListResponse,
+    ManualImportJobRequest,
     Recover401JobRequest,
     StartImportJobRequest,
+    StartManualImportJobRequest,
     StartRecover401JobRequest,
     Sub2API401ScanResponse,
     Sub2APIConfigResponse,
@@ -193,6 +197,42 @@ def create_app(
             verify_sub2api_tls=sub2api.verify_tls,
         )
         record = job_manager.create_recovery(resolved)
+        return CreateJobResponse(job=record.snapshot())
+
+    @app.post(
+        "/api/jobs/manual-import",
+        response_model=CreateJobResponse,
+        status_code=202,
+        tags=["jobs"],
+    )
+    async def create_manual_import_job(
+        payload: StartManualImportJobRequest,
+    ) -> CreateJobResponse:
+        payload_size = len(
+            json.dumps(
+                payload.payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        if payload_size > MAX_MANUAL_IMPORT_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="account.json 不能超过 5 MiB",
+            )
+        try:
+            sub2api = persistent_config.require()
+        except ConfigStoreError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        resolved = ManualImportJobRequest(
+            **payload.model_dump(mode="json"),
+            sub2api_base_url=sub2api.base_url,
+            sub2api_token=sub2api.access_token,
+            verify_sub2api_tls=sub2api.verify_tls,
+            group_id=sub2api.group_id,
+        )
+        record = job_manager.create_manual_import(resolved)
         return CreateJobResponse(job=record.snapshot())
 
     @app.get("/api/jobs/{job_id}", response_model=JobSnapshot, tags=["jobs"])

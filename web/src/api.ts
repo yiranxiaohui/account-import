@@ -4,6 +4,7 @@ import type {
   ImportJobRequest,
   JobSnapshot,
   LocalAccountList,
+  ManualImportJobRequest,
   Recover401JobRequest,
   Sub2API401Scan,
   Sub2APIConfig,
@@ -59,6 +60,13 @@ export function getSub2APIOptions(): Promise<Sub2APIOptions> {
 
 export function createImportJob(payload: ImportJobRequest): Promise<CreateJobResponse> {
   return request<CreateJobResponse>('/api/jobs', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function createManualImportJob(payload: ManualImportJobRequest): Promise<CreateJobResponse> {
+  return request<CreateJobResponse>('/api/jobs/manual-import', {
     method: 'POST',
     body: JSON.stringify(payload),
   })

@@ -109,6 +109,77 @@ async def test_import_job_uses_proxy_selected_for_that_request(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_manual_import_job_uses_persisted_config_and_selected_proxy(
+    tmp_path, monkeypatch
+):
+    store = ConfigStore(tmp_path / "config.json")
+    store.save(
+        Sub2APIConfigUpdate(
+            base_url="https://sub2api.example.com",
+            access_token="admin-token",
+            group_id=7,
+        )
+    )
+    manager = JobManager()
+    captured = {}
+
+    def fake_create(request):
+        captured["request"] = request
+        return JobRecord(id="manual-job-1")
+
+    monkeypatch.setattr(manager, "create_manual_import", fake_create)
+    transport = httpx.ASGITransport(app=create_app(manager=manager, config_store=store))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/jobs/manual-import",
+            json={
+                "filename": "../account.json",
+                "payload": {
+                    "accounts": [
+                        {
+                            "name": "owner@example.com",
+                            "platform": "openai",
+                            "type": "oauth",
+                            "credentials": {"access_token": "secret"},
+                        }
+                    ]
+                },
+                "proxy_id": 23,
+            },
+        )
+
+    assert response.status_code == 202
+    request = captured["request"]
+    assert request.filename == "account.json"
+    assert request.group_id == 7
+    assert request.proxy_id == 23
+    assert request.sub2api_token.get_secret_value() == "admin-token"
+
+
+@pytest.mark.asyncio
+async def test_manual_import_rejects_payload_larger_than_five_mib(tmp_path):
+    store = ConfigStore(tmp_path / "config.json")
+    store.save(
+        Sub2APIConfigUpdate(
+            base_url="https://sub2api.example.com",
+            access_token="admin-token",
+        )
+    )
+    transport = httpx.ASGITransport(app=create_app(config_store=store))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/jobs/manual-import",
+            json={
+                "filename": "account.json",
+                "payload": {"padding": "x" * (5 * 1024 * 1024)},
+            },
+        )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "account.json 不能超过 5 MiB"
+
+
+@pytest.mark.asyncio
 async def test_job_requires_persisted_sub2api_config(tmp_path):
     store = ConfigStore(tmp_path / "missing.json")
     transport = httpx.ASGITransport(app=create_app(config_store=store))

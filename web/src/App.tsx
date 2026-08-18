@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   createImportJob,
+  createManualImportJob,
   createRecover401Job,
   getHealth,
   getJob,
@@ -23,6 +24,7 @@ import type {
 import './App.css'
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'partial', 'failed'])
+const MAX_MANUAL_FILE_BYTES = 5 * 1024 * 1024
 const STORAGE_KEYS = {
   redeemUrl: 'account-import:redeem-url',
   sub2apiUrl: 'account-import:sub2api-url',
@@ -55,8 +57,15 @@ const RECOVERY_STAGES = [
   { key: 'importing', label: '更新账号', caption: '原地替换并清除错误' },
 ]
 
+const MANUAL_IMPORT_STAGES = [
+  { key: 'checking', label: '解析文件', caption: '验证 account.json 结构' },
+  { key: 'downloading', label: '整理账号', caption: '规范账号与目标配置' },
+  { key: 'importing', label: '导入 Sub2API', caption: '创建可用账号' },
+]
+
 type ViewKey = 'workspace' | 'records' | 'settings'
-type TaskMode = 'import' | 'recovery'
+type TaskMode = 'import' | 'manual' | 'recovery'
+type ManualFile = { name: string; size: number; payload: unknown }
 
 const NAV_ITEMS: Array<{ key: ViewKey; label: string; caption: string }> = [
   { key: 'workspace', label: '任务工作台', caption: '导入与 401 找回' },
@@ -101,6 +110,11 @@ function parseCardCodes(source: string): string[] {
 
 function compactUrl(value: string): string {
   return value.trim().replace(/\/+$/, '')
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  return `${(bytes / 1024).toFixed(bytes < 1024 * 1024 ? 1 : 2)} ${bytes < 1024 * 1024 ? 'KiB' : 'MiB'}`
 }
 
 function stagePosition(stage: string): number {
@@ -151,6 +165,8 @@ function App() {
   const [token, setToken] = useState('')
   const [showToken, setShowToken] = useState(false)
   const [cardInput, setCardInput] = useState('')
+  const [manualFile, setManualFile] = useState<ManualFile | null>(null)
+  const [manualFileInputKey, setManualFileInputKey] = useState(0)
   const [mode, setMode] = useState<'all' | '401'>('all')
   const [verifyTls, setVerifyTls] = useState(true)
   const [groupId, setGroupId] = useState<number | null>(null)
@@ -177,7 +193,8 @@ function App() {
   const running = submitting || savingConfig || scanning401 || (!!job && !TERMINAL_STATUSES.has(job.status))
   const currentStage = job ? stagePosition(job.stage) : -1
   const isRecoveryJob = job?.summary.operation === 'recover_401'
-  const stages = isRecoveryJob ? RECOVERY_STAGES : IMPORT_STAGES
+  const isManualJob = job?.summary.operation === 'manual_import'
+  const stages = isRecoveryJob ? RECOVERY_STAGES : isManualJob ? MANUAL_IMPORT_STAGES : IMPORT_STAGES
   const activeJobId = job?.id
   const activeJobStatus = job?.status
 
@@ -339,6 +356,63 @@ function App() {
     }
   }
 
+  const clearManualFile = () => {
+    setManualFile(null)
+    setManualFileInputKey((value) => value + 1)
+  }
+
+  const handleManualFileSelect = async (file?: File) => {
+    setFormError('')
+    clearManualFile()
+    if (!file) return
+    if (file.size > MAX_MANUAL_FILE_BYTES) {
+      setFormError('account.json 不能超过 5 MiB')
+      return
+    }
+    if (file.size === 0) {
+      setFormError('account.json 是空文件')
+      return
+    }
+    try {
+      const parsed: unknown = JSON.parse(await file.text())
+      if (parsed === null || typeof parsed !== 'object') {
+        throw new Error('JSON 顶层必须是对象或账号数组')
+      }
+      setManualFile({ name: file.name, size: file.size, payload: parsed })
+    } catch (error) {
+      setFormError(error instanceof Error ? `无法读取 account.json：${error.message}` : '无法读取 account.json')
+    }
+  }
+
+  const handleManualSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    setActiveView('workspace')
+    setTaskMode('manual')
+    setFormError('')
+    if (!manualFile) {
+      setFormError('请先选择从网站下载的 account.json')
+      return
+    }
+
+    setSubmitting(true)
+    setJob(null)
+    try {
+      if (configDirty || token.trim() || !hasSavedToken) {
+        await persistSub2APIConfig()
+      }
+      const result = await createManualImportJob({
+        filename: manualFile.name,
+        payload: manualFile.payload,
+        proxy_id: proxyId,
+      })
+      setJob(result.job)
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : '创建 JSON 导入任务失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   const handleScan401 = async () => {
     setActiveView('workspace')
     setTaskMode('recovery')
@@ -409,6 +483,7 @@ function App() {
   const redeem = job?.summary.redeem
   const download = job?.summary.download
   const imported = job?.summary.import
+  const manualFileSummary = job?.summary.manual_file
   const recovery = job?.summary.recovery
   const jobScan = job?.summary.scan
   const importedCount = Number(imported?.account_created || 0)
@@ -493,6 +568,7 @@ function App() {
             className={`panel form-panel page-panel task-${taskMode}`}
             onSubmit={(event) => {
               if (activeView === 'workspace' && taskMode === 'import') handleSubmit(event)
+              else if (activeView === 'workspace' && taskMode === 'manual') handleManualSubmit(event)
               else event.preventDefault()
             }}
           >
@@ -501,7 +577,7 @@ function App() {
                 <span className="panel-index">{activeView === 'workspace' ? '01' : activeView === 'records' ? '02' : '03'}</span>
                 <div>
                   <h2>{activeView === 'workspace' ? '凭据任务' : activeView === 'records' ? '本地账号账本' : 'Sub2API 配置'}</h2>
-                  <p>{activeView === 'workspace' ? '选择额度导入或 401 自动找回' : activeView === 'records' ? '查看已导入和已恢复的账号' : '连接实例并设置默认分组'}</p>
+                  <p>{activeView === 'workspace' ? '选择卡密、JSON 导入或 401 自动找回' : activeView === 'records' ? '查看已导入和已恢复的账号' : '连接实例并设置默认分组'}</p>
                 </div>
               </div>
               {activeView === 'settings' && (
@@ -528,6 +604,19 @@ function App() {
               </button>
               <button
                 type="button"
+                className={taskMode === 'manual' ? 'active' : ''}
+                onClick={() => {
+                  setTaskMode('manual')
+                  setFormError('')
+                  if (job && TERMINAL_STATUSES.has(job.status)) setJob(null)
+                }}
+                disabled={running}
+              >
+                <strong>JSON 导入</strong>
+                <span>上传 account.json 直接创建账号</span>
+              </button>
+              <button
+                type="button"
                 className={taskMode === 'recovery' ? 'active' : ''}
                 onClick={() => {
                   setTaskMode('recovery')
@@ -542,11 +631,11 @@ function App() {
             </div>
 
             <div className="field-grid address-grid">
-              <label className="field workspace-only">
+              <label className="field workspace-only redeem-only">
                 <span>兑换服务地址</span>
                 <div className="input-wrap">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M4 12h16M12 4a13 13 0 010 16M12 4a13 13 0 000 16" /></svg>
-                  <input type="url" value={redeemBaseUrl} onChange={(e) => setRedeemBaseUrl(e.target.value)} placeholder="https://redeem.example.com" disabled={running} required={activeView === 'workspace'} />
+                  <input type="url" value={redeemBaseUrl} onChange={(e) => setRedeemBaseUrl(e.target.value)} placeholder="https://redeem.example.com" disabled={running} required={activeView === 'workspace' && taskMode !== 'manual'} />
                 </div>
               </label>
               <label className="field settings-only">
@@ -612,7 +701,7 @@ function App() {
               </div>
             </div>
 
-            <label className="field import-only">
+            <label className="field import-target-only">
               <div className="field-label-row">
                 <span>本次导入代理</span>
                 <span className="recommended">仅用于当前任务</span>
@@ -633,6 +722,33 @@ function App() {
               </div>
               <small>{loadingOptions ? '正在读取 Sub2API 代理…' : `已读取 ${proxyOptions.length} 个可用代理；选择不会保存为全局配置`}</small>
             </label>
+
+            <div className="field manual-file-field manual-only">
+              <div className="field-label-row">
+                <span>账号文件</span>
+                <span className="recommended">最大 5 MiB · 1000 个账号</span>
+              </div>
+              <label className={`file-drop ${manualFile ? 'has-file' : ''}`}>
+                <input
+                  key={manualFileInputKey}
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={(event) => void handleManualFileSelect(event.target.files?.[0])}
+                  disabled={running}
+                />
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 16V4M7 9l5-5 5 5M5 14v5h14v-5" />
+                </svg>
+                <span>
+                  <strong>{manualFile ? manualFile.name : '选择 account.json'}</strong>
+                  <small>{manualFile ? `${formatFileSize(manualFile.size)} · 已在浏览器内完成 JSON 校验` : '点击选择从兑换网站下载的账号文件'}</small>
+                </span>
+              </label>
+              <div className="manual-file-note">
+                <span>凭据不落盘；文件内代理会忽略，统一使用上方选择的代理。</span>
+                {manualFile && <button type="button" onClick={clearManualFile} disabled={running}>移除</button>}
+              </div>
+            </div>
 
             <label className="field code-field import-only">
               <div className="field-label-row">
@@ -766,12 +882,12 @@ function App() {
                     <div className="local-ledger-item" key={`${account.sub2api_base_url}-${account.sub2api_account_id}`}>
                       <div>
                         <strong>{account.email}</strong>
-                        <span>{account.card_code}</span>
+                        <span>{account.card_code || '手动 JSON 导入'}</span>
                       </div>
                       <div>
                         <span>{account.platform} · #{account.sub2api_account_id}</span>
                         <small>
-                          {account.last_operation === 'recover_401' ? '401 找回' : '首次导入'} · {' '}
+                          {account.last_operation === 'recover_401' ? '401 找回' : account.last_operation === 'manual_import' ? 'JSON 导入' : '首次导入'} · {' '}
                           {new Date(account.updated_at).toLocaleString('zh-CN', { hour12: false })}
                         </small>
                       </div>
@@ -789,6 +905,9 @@ function App() {
 
             <button className="submit-button import-only" type="submit" disabled={running || !configLoaded || apiOnline === false}>
               {running ? <><span className="spinner" />任务执行中</> : <><span>开始兑换并导入</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5" /></svg></>}
+            </button>
+            <button className="submit-button manual-only" type="submit" disabled={running || !manualFile || !configLoaded || apiOnline === false}>
+              {running ? <><span className="spinner" />任务执行中</> : <><span>上传并导入 Sub2API</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M14 7l5 5-5 5" /></svg></>}
             </button>
           </form>
 
@@ -808,14 +927,18 @@ function App() {
                   <div className="orbit orbit-b"><i /></div>
                   <div className="orbit-core"><svg viewBox="0 0 32 32"><path d="M8 10h11a5 5 0 010 10h-6M12 7l-4 3 4 3M20 19l4 3-4 3" /></svg></div>
                 </div>
-                <h3>{taskMode === 'recovery' ? '等待新的 401 找回任务' : '等待新的额度导入任务'}</h3>
+                <h3>{taskMode === 'recovery' ? '等待新的 401 找回任务' : taskMode === 'manual' ? '等待新的 JSON 导入任务' : '等待新的额度导入任务'}</h3>
                 <p>
                   {taskMode === 'recovery'
                     ? '扫描 Sub2API 中的失效账号后，找回和更新进度会显示在这里。'
-                    : '粘贴兑换码并开始任务后，兑换、下载和导入进度会显示在这里。'}
+                    : taskMode === 'manual'
+                      ? '选择 account.json 后，文件解析和 Sub2API 导入进度会显示在这里。'
+                      : '粘贴兑换码并开始任务后，兑换、下载和导入进度会显示在这里。'}
                 </p>
                 {taskMode === 'recovery' ? (
                   <div className="mini-flow"><span>扫描 401</span><i>→</i><span>找回凭据</span><i>→</i><span>原地更新</span></div>
+                ) : taskMode === 'manual' ? (
+                  <div className="mini-flow"><span>account.json</span><i>→</i><span>解析账号</span><i>→</i><span>Sub2API</span></div>
                 ) : (
                   <div className="mini-flow"><span>兑换码</span><i>→</i><span>额度文件</span><i>→</i><span>Sub2API</span></div>
                 )}
@@ -852,6 +975,13 @@ function App() {
                       <StatCard label="选择找回" value={Number(jobScan?.selected || 0)} accent="#70cfff" />
                       <StatCard label="成功更新" value={recoveredCount} accent="#5de3bb" />
                       <StatCard label="需检查" value={recoveryFailedCount} accent={recoveryFailedCount ? '#ffb86b' : undefined} />
+                    </>
+                  ) : isManualJob ? (
+                    <>
+                      <StatCard label="文件账号" value={Number(manualFileSummary?.accounts || 0)} />
+                      <StatCard label="忽略内置代理" value={Number(manualFileSummary?.embedded_proxies || 0)} accent="#70cfff" />
+                      <StatCard label="成功导入" value={importedCount} accent="#5de3bb" />
+                      <StatCard label="需检查" value={Number(imported?.account_failed || 0)} accent={Number(imported?.account_failed || 0) ? '#ffb86b' : undefined} />
                     </>
                   ) : (
                     <>
