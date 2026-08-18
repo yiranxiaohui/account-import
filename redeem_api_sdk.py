@@ -233,8 +233,13 @@ class RedeemClient:
 
     # --- 公开 API ---
 
-    def health_check(self, card_codes: list[str]) -> HealthCheckResult:
+    def health_check(
+        self, card_codes: list[str], timeout: Optional[float] = None
+    ) -> HealthCheckResult:
         """检测卡密下账号的当前状态（只读，不修改数据）。
+
+        ``timeout`` 可用于调用方限制可选预检的等待时间；不传时保持 SDK
+        原有的至少 90 秒超时，避免影响独立使用该 SDK 的现有调用方。
 
         ```bash
         curl -X POST {base}/api/redeem/reclaim/health-check \\
@@ -246,7 +251,9 @@ class RedeemClient:
             r = requests.post(
                 f"{self.base_url}/api/redeem/reclaim/health-check",
                 json={"card_codes": card_codes},
-                timeout=max(self.timeout, 90),
+                timeout=max(float(timeout), 1.0)
+                if timeout is not None
+                else max(self.timeout, 90),
             )
             data = r.json()
             if not data.get("ok"):

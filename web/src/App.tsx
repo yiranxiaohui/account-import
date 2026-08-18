@@ -406,12 +406,17 @@ function App() {
   }
 
   const health = job?.summary.health
+  const redeem = job?.summary.redeem
   const download = job?.summary.download
   const imported = job?.summary.import
   const recovery = job?.summary.recovery
   const jobScan = job?.summary.scan
   const importedCount = Number(imported?.account_created || 0)
-  const failedCount = Number(imported?.account_failed || 0) + Number(download?.failed || 0)
+  const redeemIssueCount = Number(redeem?.issue_count || 0)
+    || Number(redeem?.failed || 0) + Number(redeem?.unreclaimable || 0)
+  const failedCount = Number(imported?.account_failed || 0)
+    + Number(download?.failed || 0)
+    + redeemIssueCount
   const recoveredCount = Number(recovery?.updated || 0)
   const recoveryFailedCount = Number(recovery?.failed || 0)
 

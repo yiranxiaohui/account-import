@@ -13,7 +13,9 @@ class FakeRedeemClient:
         self.base_url = base_url
         self.timeout = timeout
 
-    def health_check(self, card_codes: list[str]) -> HealthCheckResult:
+    def health_check(
+        self, card_codes: list[str], timeout: float | None = None
+    ) -> HealthCheckResult:
         return HealthCheckResult(ok=True, total=1, healthy=1)
 
     def batch_reclaim(self, card_codes: list[str], mode: str) -> BatchReclaimResult:
@@ -164,3 +166,75 @@ async def test_recovery_job_matches_by_code_and_email_then_updates_in_place(
     assert local_records["total"] == 1
     assert local_records["items"][0]["last_operation"] == "recover_401"
     assert local_records["items"][0]["sub2api_account_id"] == 71
+
+
+@pytest.mark.asyncio
+async def test_empty_batch_reports_sanitized_card_errors_and_short_health_timeout(
+    monkeypatch,
+):
+    health_timeouts: list[float | None] = []
+
+    class InvalidCardRedeemClient:
+        def __init__(self, base_url: str, timeout: int):
+            self.base_url = base_url
+            self.timeout = timeout
+
+        def health_check(
+            self, card_codes: list[str], timeout: float | None = None
+        ) -> HealthCheckResult:
+            health_timeouts.append(timeout)
+            return HealthCheckResult(ok=False, error="read timed out")
+
+        def batch_reclaim(self, card_codes: list[str], mode: str) -> BatchReclaimResult:
+            return self._result(card_codes)
+
+        def refresh_progress(self, card_codes: list[str]) -> BatchReclaimResult:
+            return self._result(card_codes)
+
+        @staticmethod
+        def _result(card_codes: list[str]) -> BatchReclaimResult:
+            return BatchReclaimResult(
+                ok=True,
+                requested_cards=len(card_codes),
+                valid_cards=0,
+                cards=[
+                    {
+                        "card_code": card_code,
+                        "card_status": "card_not_found",
+                        "error": f"兑换码 {card_code} 无效",
+                        "tasks": [],
+                    }
+                    for card_code in card_codes
+                ],
+            )
+
+    monkeypatch.setenv("ACCOUNT_IMPORT_HEALTH_TIMEOUT", "3")
+    monkeypatch.setattr("app.jobs.RedeemClient", InvalidCardRedeemClient)
+    manager = JobManager()
+    request = ImportJobRequest(
+        redeem_base_url="https://redeem.example.com",
+        sub2api_base_url="http://sub2api.example.com",
+        sub2api_token="admin-token",
+        card_codes=["RCL-AAAA-BBBB", "RCL-CCCC-DDDD"],
+    )
+
+    record = manager.create(request)
+    assert record.task is not None
+    await record.task
+
+    assert health_timeouts == [3.0]
+    assert record.status == "failed"
+    assert record.progress == 10
+    assert record.error == ("没有取得可下载的额度文件：兑换码 [兑换码] 无效（2 项）")
+    assert "RCL-AAAA-BBBB" not in record.error
+    assert "RCL-CCCC-DDDD" not in record.error
+    assert record.summary["redeem"]["requested_cards"] == 2
+    assert record.summary["redeem"]["valid_cards"] == 0
+    assert record.summary["redeem"]["issue_count"] == 2
+    assert record.summary["redeem"]["issues"] == [
+        {"message": "兑换码 [兑换码] 无效", "count": 2}
+    ]
+    assert any(
+        event["level"] == "warning" and "（2 项）" in event["message"]
+        for event in record.events
+    )

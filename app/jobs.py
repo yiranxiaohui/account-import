@@ -4,6 +4,7 @@ import asyncio
 import os
 import time
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -104,6 +105,13 @@ class JobManager:
                 or os.getenv("TEAM_IMPORT_MAX_WAIT", "600")
             ),
         )
+        self.health_timeout = max(
+            1.0,
+            float(
+                os.getenv("ACCOUNT_IMPORT_HEALTH_TIMEOUT")
+                or os.getenv("TEAM_IMPORT_HEALTH_TIMEOUT", "15")
+            ),
+        )
 
     def create(self, request: ImportJobRequest) -> JobRecord:
         self._prune()
@@ -162,10 +170,15 @@ class JobManager:
         codes = request.card_codes
         client = RedeemClient(str(request.redeem_base_url).rstrip("/"), timeout=45)
         job.update(
-            status="running", stage="checking", progress=4, message="正在检查兑换码额度"
+            status="running",
+            stage="checking",
+            progress=4,
+            message=f"正在快速检查兑换码额度（最多 {self.health_timeout:g} 秒）",
         )
 
-        health = await asyncio.to_thread(client.health_check, codes)
+        health = await asyncio.to_thread(
+            client.health_check, codes, self.health_timeout
+        )
         if health.ok:
             job.summary["health"] = {
                 "total": health.total,
@@ -207,9 +220,18 @@ class JobManager:
                 for task in final.all_tasks
                 if task.status == "done" and task.order_no and task.download_token
             )
+            batch_issues, batch_issue_count = self._redeem_issues([final], batch)
+            if batch_issues:
+                job.log(
+                    f"第 {batch_no} 批存在未生成下载项："
+                    f"{self._format_redeem_issues(batch_issues)}",
+                    "warning",
+                )
             job.log(
                 f"第 {batch_no} 批处理完成：完成 {final.done}，失败 {final.failed}，不可找回 {final.unreclaimable}",
-                "success" if final.failed == 0 else "warning",
+                "success"
+                if final.failed == 0 and batch_issue_count == 0
+                else "warning",
             )
 
         unique_downloads: list[ReclaimTask] = []
@@ -220,12 +242,23 @@ class JobManager:
                 unique_downloads.append(task)
                 seen_downloads.add(identity)
 
+        redeem_issues, redeem_issue_count = self._redeem_issues(final_results, codes)
         job.summary["redeem"] = {
             "batches": len(batches),
+            "requested_cards": sum(item.requested_cards for item in final_results),
+            "valid_cards": sum(item.valid_cards for item in final_results),
+            "distinct_resources": sum(
+                item.distinct_resources for item in final_results
+            ),
             "done": sum(item.done for item in final_results),
             "failed": sum(item.failed for item in final_results),
             "unreclaimable": sum(item.unreclaimable for item in final_results),
             "downloadable": len(unique_downloads),
+            "issue_count": redeem_issue_count,
+            "issues": [
+                {"message": message, "count": count}
+                for message, count in redeem_issues.most_common()
+            ],
         }
         if not unique_downloads:
             mode_hint = (
@@ -233,7 +266,12 @@ class JobManager:
                 if request.mode == "401"
                 else ""
             )
-            raise RuntimeError(f"没有取得可下载的额度文件{mode_hint}")
+            issue_hint = (
+                f"：{self._format_redeem_issues(redeem_issues)}"
+                if redeem_issues
+                else ""
+            )
+            raise RuntimeError(f"没有取得可下载的额度文件{issue_hint}{mode_hint}")
 
         payloads: list[dict[str, Any]] = []
         download_errors: list[dict[str, str]] = []
@@ -690,6 +728,79 @@ class JobManager:
             if refreshed.ok:
                 result = refreshed
         return result
+
+    @classmethod
+    def _redeem_issues(
+        cls,
+        results: list[BatchReclaimResult],
+        card_codes: list[str],
+    ) -> tuple[Counter[str], int]:
+        issues: Counter[str] = Counter()
+        issue_count = 0
+        for result in results:
+            card_errors = 0
+            for card in result.cards:
+                if not isinstance(card, dict):
+                    continue
+                message = str(card.get("error") or "").strip()
+                if not message:
+                    continue
+                card_errors += 1
+                issue_count += 1
+                issues[cls._sanitize_redeem_message(message, card_codes)] += 1
+
+            invalid_without_detail = max(
+                result.requested_cards - result.valid_cards - card_errors,
+                0,
+            )
+            if invalid_without_detail:
+                issue_count += invalid_without_detail
+                issues["兑换服务未识别为有效兑换码"] += invalid_without_detail
+
+            for task in result.all_tasks:
+                message = ""
+                if task.status in {
+                    "failed",
+                    "unreclaimable",
+                    "not_owned",
+                    "skipped",
+                }:
+                    message = (
+                        task.message
+                        or task.download_error
+                        or task.error_code
+                        or f"兑换任务状态异常：{task.status}"
+                    )
+                elif task.status == "done" and not task.download_token:
+                    message = (
+                        task.download_error
+                        or task.message
+                        or (
+                            "账号当前正常，未执行 401 找回"
+                            if task.no_action
+                            else "任务已完成但没有下载令牌"
+                        )
+                    )
+                if message:
+                    issue_count += 1
+                    issues[cls._sanitize_redeem_message(message, card_codes)] += 1
+        return issues, issue_count
+
+    @staticmethod
+    def _sanitize_redeem_message(message: str, card_codes: list[str]) -> str:
+        sanitized = " ".join(message.split())
+        for card_code in sorted(card_codes, key=len, reverse=True):
+            sanitized = sanitized.replace(card_code, "[兑换码]")
+        return sanitized[:240] or "兑换服务未提供具体原因"
+
+    @staticmethod
+    def _format_redeem_issues(issues: Counter[str]) -> str:
+        top_issues = issues.most_common(3)
+        parts = [f"{message}（{count} 项）" for message, count in top_issues]
+        remaining = sum(issues.values()) - sum(count for _, count in top_issues)
+        if remaining:
+            parts.append(f"其他原因（{remaining} 项）")
+        return "；".join(parts)
 
     @staticmethod
     def _batch_progress(result: BatchReclaimResult) -> float:
