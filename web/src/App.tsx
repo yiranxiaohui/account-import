@@ -81,7 +81,7 @@ const VIEW_META: Record<ViewKey, { eyebrow: string; title: string; accent: strin
     eyebrow: 'TARGET · SECURITY · PERSISTENCE',
     title: '连接配置',
     accent: '安全持久化',
-    description: '管理 Sub2API 地址、管理员令牌、目标分组、代理和 TLS。',
+    description: '管理 Sub2API 地址、管理员凭据、目标分组、代理和 TLS。',
   },
 }
 
@@ -268,7 +268,7 @@ function App() {
       throw new Error('请输入 Sub2API 地址')
     }
     if (!hasSavedToken && !token.trim()) {
-      throw new Error('首次保存时请输入 Sub2API 管理员 Access Token')
+      throw new Error('首次保存时请输入 Sub2API 管理员 API Key 或 Access Token')
     }
     const config = await saveSub2APIConfig({
       base_url: compactUrl(sub2apiBaseUrl),
@@ -566,7 +566,7 @@ function App() {
             </div>
 
             <label className="field settings-only">
-              <span>管理员 Access Token</span>
+              <span>管理员 API Key / Access Token</span>
               <div className="input-wrap token-input">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="12" r="4" /><path d="M12 12h8M17 12v3M20 12v2" /></svg>
                 <input
@@ -577,7 +577,7 @@ function App() {
                     setConfigDirty(true)
                     setRecoveryScan(null)
                   }}
-                  placeholder={hasSavedToken ? '已保存；留空表示继续使用原令牌' : '粘贴 Sub2API 管理员令牌'}
+                  placeholder={hasSavedToken ? '已保存；留空表示继续使用原凭据' : '粘贴管理员 API Key（推荐）或 Access Token'}
                   autoComplete="off"
                   disabled={running || !configLoaded}
                   required={activeView === 'settings' && !hasSavedToken}
@@ -586,7 +586,7 @@ function App() {
                   <EyeIcon open={showToken} />
                 </button>
               </div>
-              <small>{hasSavedToken ? '服务端已保存令牌；输入新令牌并保存即可更新。' : '令牌将写入权限为 0600 的服务端配置文件，不会回传到浏览器。'}</small>
+              <small>{hasSavedToken ? '服务端已保存凭据；输入新凭据并保存即可更新。' : '推荐使用 admin- 开头的管理员 API Key；凭据将写入权限为 0600 的服务端配置文件，不会回传到浏览器。'}</small>
             </label>
 
             <div className="field import-only">

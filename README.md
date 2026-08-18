@@ -5,7 +5,7 @@
 - 前端：React + TypeScript + Vite，源码位于 `web/`
 - 后端：FastAPI，使用现有 `redeem_api_sdk.py`
 - 导入：调用 Sub2API 官方 `POST /api/v1/admin/accounts/batch` 批量创建接口
-- 持久化：Sub2API 地址、Access Token、目标分组、目标代理和 TLS 选项保存在服务端配置文件
+- 持久化：Sub2API 地址、管理员 API Key 或 Access Token、目标分组、目标代理和 TLS 选项保存在服务端配置文件
 - 401 恢复：扫描 Sub2API 已记录的 401 账号，从备注或旧名称读取兑换码，原地更新凭据并清除错误状态
 - 本地账本：使用 SQLite 记录邮箱、兑换码、Sub2API 账号 ID、导入/恢复结果与时间，不保存账号凭据
 - 安全：配置文件权限固定为 `0600`，读取接口不会回传 Token；下载凭据只在内存中流转
@@ -51,7 +51,7 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ## 使用说明
 
 1. 填写兑换服务地址和 Sub2API 实例地址。
-2. 从 Sub2API 已登录管理端取得管理员 Access Token，并粘贴到页面；点击“保存并刷新”。
+2. 从 Sub2API 管理端生成 `admin-` 开头的管理员 API Key（推荐），或取得已登录管理员的 Access Token，粘贴到页面后点击“保存并刷新”。应用会自动为 API Key 使用 `x-api-key`，为 Access Token 使用 Bearer 认证。
 3. 从远端加载的列表中选择目标分组和代理，不选择代理时使用直连。
 4. 粘贴兑换码；支持换行、空格、中文/英文逗号分隔，最多 100 个。
 5. 默认使用“下载全部额度”；“只找回 401”只会下载失效后成功找回的账号。
@@ -72,7 +72,7 @@ ACCOUNT_IMPORT_CONFIG_FILE=/secure/path/account-import.json \
   uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-配置采用原子写入，文件权限固定为 `0600`。Access Token 以明文保存在该受限文件中，因此应确保运行 FastAPI 的系统用户和配置目录可信。前端只能读取是否已经配置 Token，不能取回 Token 原文。更新其他配置时将 Token 留空，会继续保留原 Token。
+配置采用原子写入，文件权限固定为 `0600`。管理员 API Key 或 Access Token 以明文保存在该受限文件中，因此应确保运行 FastAPI 的系统用户和配置目录可信。前端只能读取是否已经配置凭据，不能取回原文。更新其他配置时将凭据留空，会继续保留原凭据。
 
 ## 本地账号记录
 

@@ -23,6 +23,7 @@ ACCOUNT = {
     "concurrency": 2,
     "priority": 1,
 }
+ADMIN_API_KEY = "admin-" + "a" * 64
 
 
 def test_extracts_standard_sub2api_payload_from_bytes():
@@ -91,14 +92,20 @@ def test_build_import_url(base: str, expected: str):
     assert build_import_url(base) == expected
 
 
+@pytest.mark.parametrize("token", ["admin-token", ADMIN_API_KEY])
 @pytest.mark.asyncio
 async def test_fetches_group_and_proxy_options_without_exposing_proxy_secrets(
-    monkeypatch,
+    monkeypatch, token: str
 ):
     real_client = httpx.AsyncClient
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.headers["Authorization"] == "Bearer admin-token"
+        if token == ADMIN_API_KEY:
+            assert request.headers["x-api-key"] == ADMIN_API_KEY
+            assert "Authorization" not in request.headers
+        else:
+            assert request.headers["Authorization"] == "Bearer admin-token"
+            assert "x-api-key" not in request.headers
         if request.url.path.endswith("/admin/groups/all"):
             data = [{"id": 7, "name": "OpenAI 主组", "platform": "openai"}]
         else:
@@ -124,7 +131,7 @@ async def test_fetches_group_and_proxy_options_without_exposing_proxy_secrets(
 
     result = await fetch_sub2api_options(
         base_url="https://sub2api.example.com",
-        token="admin-token",
+        token=token,
         verify_tls=True,
     )
 
@@ -140,6 +147,8 @@ async def test_batch_create_sends_group_proxy_email_name_and_card_note(monkeypat
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/api/v1/admin/accounts/batch")
+        assert request.headers["x-api-key"] == ADMIN_API_KEY
+        assert "Authorization" not in request.headers
         received.update(json.loads(request.content))
         return httpx.Response(
             200,
@@ -176,7 +185,7 @@ async def test_batch_create_sends_group_proxy_email_name_and_card_note(monkeypat
 
     result = await import_to_sub2api(
         base_url="https://sub2api.example.com",
-        token="admin-token",
+        token=ADMIN_API_KEY,
         payload=payload,
         verify_tls=True,
         idempotency_key="job-1",

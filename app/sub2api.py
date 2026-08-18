@@ -18,6 +18,7 @@ EMAIL_SEARCH_PATTERN = re.compile(
 )
 CARD_CODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$")
 HTTP_401_PATTERN = re.compile(r"(?<!\d)401(?!\d)")
+ADMIN_API_KEY_PATTERN = re.compile(r"^admin-[0-9a-f]{64}$", re.IGNORECASE)
 
 
 class DownloadPayloadError(ValueError):
@@ -308,6 +309,16 @@ def build_import_url(base_url: str) -> str:
     return build_api_url(base_url, "/admin/accounts/batch")
 
 
+def _admin_auth_headers(token: str, *, user_agent: str) -> dict[str, str]:
+    credential = token.strip()
+    headers = {"User-Agent": user_agent}
+    if ADMIN_API_KEY_PATTERN.fullmatch(credential):
+        headers["x-api-key"] = credential
+    else:
+        headers["Authorization"] = f"Bearer {credential}"
+    return headers
+
+
 def _response_data(response: httpx.Response, operation: str) -> Any:
     try:
         result = response.json()
@@ -332,7 +343,7 @@ def _response_data(response: httpx.Response, operation: str) -> Any:
 async def fetch_sub2api_options(
     *, base_url: str, token: str, verify_tls: bool
 ) -> dict[str, list[dict[str, Any]]]:
-    headers = {"Authorization": f"Bearer {token}", "User-Agent": "account-import/0.2"}
+    headers = _admin_auth_headers(token, user_agent="account-import/0.4")
     try:
         async with httpx.AsyncClient(
             verify=verify_tls, follow_redirects=True, timeout=30
@@ -382,7 +393,7 @@ async def fetch_sub2api_options(
 async def fetch_sub2api_401_accounts(
     *, base_url: str, token: str, verify_tls: bool
 ) -> dict[str, Any]:
-    headers = {"Authorization": f"Bearer {token}", "User-Agent": "account-import/0.3"}
+    headers = _admin_auth_headers(token, user_agent="account-import/0.4")
     page = 1
     page_size = 1000
     scanned = 0
@@ -460,7 +471,7 @@ async def replace_sub2api_account_credentials(
     if not email or not isinstance(credentials, dict) or not credentials:
         raise Sub2APIError("找回结果缺少邮箱或凭据")
 
-    headers = {"Authorization": f"Bearer {token}", "User-Agent": "account-import/0.3"}
+    headers = _admin_auth_headers(token, user_agent="account-import/0.4")
     update_body = {
         "name": email,
         "notes": card_code,
@@ -547,11 +558,8 @@ async def import_to_sub2api(
         ) as client:
             for batch_index, start in enumerate(range(0, len(accounts), 100)):
                 batch = accounts[start : start + 100]
-                headers = {
-                    "Authorization": f"Bearer {token}",
-                    "Idempotency-Key": f"{idempotency_key}-{batch_index + 1}",
-                    "User-Agent": "account-import/0.2",
-                }
+                headers = _admin_auth_headers(token, user_agent="account-import/0.4")
+                headers["Idempotency-Key"] = f"{idempotency_key}-{batch_index + 1}"
                 response = await client.post(
                     url, headers=headers, json={"accounts": batch}
                 )

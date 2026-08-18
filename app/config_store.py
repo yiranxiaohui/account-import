@@ -63,7 +63,7 @@ class ConfigStore:
     def require(self) -> StoredSub2APIConfig:
         config = self.load()
         if config is None or not config.access_token.get_secret_value():
-            raise ConfigStoreError("请先保存 Sub2API 地址和管理员 Access Token")
+            raise ConfigStoreError("请先保存 Sub2API 地址和管理员凭据")
         return config
 
     def load(self) -> StoredSub2APIConfig | None:
@@ -87,7 +87,9 @@ class ConfigStore:
             if not next_token and existing is not None:
                 next_token = existing.access_token.get_secret_value()
             if not next_token:
-                raise ConfigStoreError("首次保存时必须提供管理员 Access Token")
+                raise ConfigStoreError(
+                    "首次保存时必须提供管理员 API Key 或 Access Token"
+                )
 
             stored = StoredConfig(
                 sub2api=StoredSub2APIConfig(
