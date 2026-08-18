@@ -33,6 +33,8 @@ class JobInputBase(BaseModel):
 class StartImportJobRequest(JobInputBase):
     """Public job request; Sub2API credentials come from persistent config."""
 
+    proxy_id: int | None = Field(default=None, gt=0)
+
 
 class ImportJobRequest(JobInputBase):
     """Resolved internal request containing persisted Sub2API credentials."""
@@ -49,7 +51,6 @@ class Sub2APIConfigUpdate(BaseModel):
     access_token: SecretStr | None = None
     verify_tls: bool = True
     group_id: int | None = Field(default=None, gt=0)
-    proxy_id: int | None = Field(default=None, gt=0)
 
     @field_validator("access_token", mode="before")
     @classmethod
@@ -65,7 +66,6 @@ class Sub2APIConfigResponse(BaseModel):
     has_token: bool = False
     verify_tls: bool = True
     group_id: int | None = None
-    proxy_id: int | None = None
     updated_at: str | None = None
 
 

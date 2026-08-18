@@ -24,7 +24,6 @@ class StoredSub2APIConfig(BaseModel):
     access_token: SecretStr
     verify_tls: bool = True
     group_id: int | None = None
-    proxy_id: int | None = None
     updated_at: str
 
 
@@ -56,7 +55,6 @@ class ConfigStore:
             has_token=bool(config.access_token.get_secret_value()),
             verify_tls=config.verify_tls,
             group_id=config.group_id,
-            proxy_id=config.proxy_id,
             updated_at=config.updated_at,
         )
 
@@ -97,7 +95,6 @@ class ConfigStore:
                     access_token=next_token,
                     verify_tls=update.verify_tls,
                     group_id=update.group_id,
-                    proxy_id=update.proxy_id,
                     updated_at=datetime.now(UTC).isoformat(),
                 )
             )

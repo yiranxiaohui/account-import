@@ -21,6 +21,12 @@ def test_card_codes_are_trimmed_and_deduplicated():
     assert request.card_codes == ["RCL-AAAA-BBBB", "RCL-CCCC-DDDD"]
 
 
+def test_import_proxy_must_be_a_positive_id():
+    assert make_request(proxy_id=23).proxy_id == 23
+    with pytest.raises(ValidationError):
+        make_request(proxy_id=0)
+
+
 @pytest.mark.parametrize(
     "code", ["", "abc", "contains space", "https://example.com", "-broken-"]
 )

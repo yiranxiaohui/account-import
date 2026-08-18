@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from app.config_store import ConfigStore
+from app.jobs import JobManager, JobRecord
 from app.ledger import AccountLedger
 from app.main import create_app
 from app.models import Sub2APIConfigUpdate
@@ -66,9 +67,47 @@ async def test_sub2api_config_api_persists_and_redacts_token(tmp_path):
     assert loaded.json()["configured"] is True
     assert loaded.json()["has_token"] is True
     assert loaded.json()["group_id"] == 7
-    assert loaded.json()["proxy_id"] == 9
+    assert "proxy_id" not in loaded.json()
     assert "access_token" not in loaded.text
     assert "admin-token" not in loaded.text
+
+
+@pytest.mark.asyncio
+async def test_import_job_uses_proxy_selected_for_that_request(tmp_path, monkeypatch):
+    store = ConfigStore(tmp_path / "config.json")
+    store.save(
+        Sub2APIConfigUpdate(
+            base_url="https://sub2api.example.com",
+            access_token="admin-token",
+            group_id=7,
+        )
+    )
+    manager = JobManager()
+    captured = {}
+
+    def fake_create(request):
+        captured["request"] = request
+        return JobRecord(id="job-1")
+
+    monkeypatch.setattr(manager, "create", fake_create)
+    transport = httpx.ASGITransport(
+        app=create_app(manager=manager, config_store=store)
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/jobs",
+            json={
+                "redeem_base_url": "https://redeem.example.com",
+                "card_codes": ["RCL-AAAA-BBBB"],
+                "mode": "all",
+                "proxy_id": 23,
+            },
+        )
+
+    assert response.status_code == 202
+    request = captured["request"]
+    assert request.group_id == 7
+    assert request.proxy_id == 23
 
 
 @pytest.mark.asyncio

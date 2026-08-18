@@ -15,7 +15,6 @@ def test_sub2api_config_survives_new_store_instance_and_is_private(tmp_path):
             access_token="super-secret-token",
             verify_tls=True,
             group_id=12,
-            proxy_id=34,
         )
     )
 
@@ -28,7 +27,6 @@ def test_sub2api_config_survives_new_store_instance_and_is_private(tmp_path):
     assert str(reloaded.base_url).rstrip("/") == "https://sub2api.example.com"
     assert reloaded.access_token.get_secret_value() == "super-secret-token"
     assert reloaded.group_id == 12
-    assert reloaded.proxy_id == 34
 
 
 def test_saving_without_new_token_preserves_existing_secret(tmp_path):
@@ -47,7 +45,6 @@ def test_saving_without_new_token_preserves_existing_secret(tmp_path):
             access_token=None,
             verify_tls=False,
             group_id=55,
-            proxy_id=None,
         )
     )
 
@@ -56,7 +53,31 @@ def test_saving_without_new_token_preserves_existing_secret(tmp_path):
     assert str(reloaded.base_url).rstrip("/") == "http://localhost:9090"
     assert reloaded.verify_tls is False
     assert reloaded.group_id == 55
-    assert reloaded.proxy_id is None
 
     raw = json.loads(config_path.read_text(encoding="utf-8"))
     assert raw["sub2api"]["access_token"] == "original-token"
+
+
+def test_legacy_global_proxy_setting_is_ignored(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "sub2api": {
+                    "base_url": "https://sub2api.example.com",
+                    "access_token": "admin-token",
+                    "verify_tls": True,
+                    "group_id": 12,
+                    "proxy_id": 34,
+                    "updated_at": "2026-08-18T00:00:00+00:00",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = ConfigStore(config_path)
+
+    assert store.require().group_id == 12
+    assert "proxy_id" not in store.public().model_dump()

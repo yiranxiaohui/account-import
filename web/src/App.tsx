@@ -61,7 +61,7 @@ type TaskMode = 'import' | 'recovery'
 const NAV_ITEMS: Array<{ key: ViewKey; label: string; caption: string }> = [
   { key: 'workspace', label: '任务工作台', caption: '导入与 401 找回' },
   { key: 'records', label: '本地记录', caption: 'SQLite 账号账本' },
-  { key: 'settings', label: '系统配置', caption: 'Sub2API 与目标' },
+  { key: 'settings', label: '系统配置', caption: 'Sub2API 连接配置' },
 ]
 
 const VIEW_META: Record<ViewKey, { eyebrow: string; title: string; accent: string; description: string }> = {
@@ -81,7 +81,7 @@ const VIEW_META: Record<ViewKey, { eyebrow: string; title: string; accent: strin
     eyebrow: 'TARGET · SECURITY · PERSISTENCE',
     title: '连接配置',
     accent: '安全持久化',
-    description: '管理 Sub2API 地址、管理员凭据、目标分组、代理和 TLS。',
+    description: '管理 Sub2API 地址、管理员凭据、默认分组和 TLS。',
   },
 }
 
@@ -206,7 +206,6 @@ function App() {
         setHasSavedToken(config.has_token)
         setVerifyTls(config.verify_tls)
         setGroupId(config.group_id ?? null)
-        setProxyId(config.proxy_id ?? null)
         setConfigUpdatedAt(config.updated_at || null)
         setConfigDirty(!config.configured)
         if (config.has_token) {
@@ -257,7 +256,6 @@ function App() {
   const applySavedConfig = (config: Sub2APIConfig) => {
     setHasSavedToken(config.has_token)
     setGroupId(config.group_id ?? null)
-    setProxyId(config.proxy_id ?? null)
     setConfigUpdatedAt(config.updated_at || null)
     setConfigDirty(false)
     setToken('')
@@ -275,7 +273,6 @@ function App() {
       access_token: token.trim() || undefined,
       verify_tls: verifyTls,
       group_id: groupId,
-      proxy_id: proxyId,
     })
     applySavedConfig(config)
     return config
@@ -324,6 +321,7 @@ function App() {
       redeem_base_url: compactUrl(redeemBaseUrl),
       card_codes: codes,
       mode,
+      proxy_id: proxyId,
     }
 
     setSubmitting(true)
@@ -497,7 +495,7 @@ function App() {
                 <span className="panel-index">{activeView === 'workspace' ? '01' : activeView === 'records' ? '02' : '03'}</span>
                 <div>
                   <h2>{activeView === 'workspace' ? '凭据任务' : activeView === 'records' ? '本地账号账本' : 'Sub2API 配置'}</h2>
-                  <p>{activeView === 'workspace' ? '选择额度导入或 401 自动找回' : activeView === 'records' ? '查看已导入和已恢复的账号' : '连接实例并设置默认导入目标'}</p>
+                  <p>{activeView === 'workspace' ? '选择额度导入或 401 自动找回' : activeView === 'records' ? '查看已导入和已恢复的账号' : '连接实例并设置默认分组'}</p>
                 </div>
               </div>
               {activeView === 'settings' && (
@@ -608,6 +606,28 @@ function App() {
               </div>
             </div>
 
+            <label className="field import-only">
+              <div className="field-label-row">
+                <span>本次导入代理</span>
+                <span className="recommended">仅用于当前任务</span>
+              </div>
+              <div className="select-wrap">
+                <select
+                  value={proxyId ?? ''}
+                  onChange={(event) => setProxyId(event.target.value ? Number(event.target.value) : null)}
+                  disabled={running || !configLoaded || loadingOptions}
+                >
+                  <option value="">不使用代理（直连）</option>
+                  {proxyOptions.map((proxy) => (
+                    <option value={proxy.id} key={proxy.id}>
+                      {proxy.name} · {proxy.protocol}://{proxy.host}:{proxy.port}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <small>{loadingOptions ? '正在读取 Sub2API 代理…' : `已读取 ${proxyOptions.length} 个可用代理；选择不会保存为全局配置`}</small>
+            </label>
+
             <label className="field code-field import-only">
               <div className="field-label-row">
                 <span>兑换码</span>
@@ -620,7 +640,7 @@ function App() {
               </div>
             </label>
 
-            <div className="destination-grid settings-only">
+            <div className="destination-grid single-destination settings-only">
               <label className="field">
                 <span>目标分组</span>
                 <div className="select-wrap">
@@ -644,30 +664,6 @@ function App() {
                   </select>
                 </div>
                 <small>{loadingOptions ? '正在读取 Sub2API 分组…' : `已读取 ${groupOptions.length} 个可用分组`}</small>
-              </label>
-              <label className="field">
-                <span>目标代理</span>
-                <div className="select-wrap">
-                  <select
-                    value={proxyId ?? ''}
-                    onChange={(event) => {
-                      setProxyId(event.target.value ? Number(event.target.value) : null)
-                      setConfigDirty(true)
-                    }}
-                    disabled={running || !configLoaded || loadingOptions}
-                  >
-                    <option value="">不使用代理（直连）</option>
-                    {proxyId !== null && !proxyOptions.some((proxy) => proxy.id === proxyId) && (
-                      <option value={proxyId}>已保存代理 #{proxyId}（当前列表中不可用）</option>
-                    )}
-                    {proxyOptions.map((proxy) => (
-                      <option value={proxy.id} key={proxy.id}>
-                        {proxy.name} · {proxy.protocol}://{proxy.host}:{proxy.port}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <small>{loadingOptions ? '正在读取 Sub2API 代理…' : `已读取 ${proxyOptions.length} 个可用代理`}</small>
               </label>
             </div>
 

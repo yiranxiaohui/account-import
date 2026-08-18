@@ -34,6 +34,7 @@ export interface ImportJobRequest {
   redeem_base_url: string
   card_codes: string[]
   mode: 'all' | '401'
+  proxy_id?: number | null
 }
 
 export interface Sub2APIConfigUpdate {
@@ -41,7 +42,6 @@ export interface Sub2APIConfigUpdate {
   access_token?: string
   verify_tls: boolean
   group_id?: number | null
-  proxy_id?: number | null
 }
 
 export interface Sub2APIConfig {
@@ -50,7 +50,6 @@ export interface Sub2APIConfig {
   has_token: boolean
   verify_tls: boolean
   group_id?: number | null
-  proxy_id?: number | null
   updated_at?: string | null
 }
 

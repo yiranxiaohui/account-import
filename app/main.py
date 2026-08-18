@@ -168,7 +168,6 @@ def create_app(
             sub2api_token=sub2api.access_token,
             verify_sub2api_tls=sub2api.verify_tls,
             group_id=sub2api.group_id,
-            proxy_id=sub2api.proxy_id,
         )
         record = job_manager.create(resolved)
         return CreateJobResponse(job=record.snapshot())
