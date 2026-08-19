@@ -92,16 +92,19 @@ export interface Sub2API401Account {
 }
 
 export interface Sub2API401Scan {
+  group_id: number
   scanned: number
   detected_401: number
   recoverable: number
   missing_card_code: number
+  other_errors: number
   unique_codes: number
   accounts: Sub2API401Account[]
 }
 
 export interface Recover401JobRequest {
   redeem_base_url: string
+  group_id: number
   account_ids: number[]
 }
 

@@ -240,6 +240,11 @@
 .recovery-tool-heading > div { display: flex; min-width: 0; flex-direction: column; }
 .recovery-tool-heading span { color: #a8b9cd; font-size: 10px; font-weight: 650; }
 .recovery-tool-heading small { margin-top: 3px; color: #53657b; font-size: 9px; line-height: 1.5; }
+.recovery-scope { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; margin-top: 10px; }
+.recovery-scope label { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.recovery-scope label > span { color: #6f8097; font-size: 9px; font-weight: 600; }
+.recovery-scope .select-wrap { height: 36px; border-radius: 7px; }
+.recovery-scope .scan-button { min-height: 36px; }
 .scan-button, .recovery-action-row button { flex: 0 0 auto; min-height: 30px; padding: 0 11px; border: 1px solid rgba(112, 207, 255, .28); border-radius: 7px; color: #83ccec; background: rgba(44, 107, 148, .12); font-size: 9px; cursor: pointer; }
 .scan-button:hover:not(:disabled), .recovery-action-row button:hover:not(:disabled) { border-color: rgba(112, 207, 255, .5); color: #b2e6ff; }
 .scan-button:disabled, .recovery-action-row button:disabled { cursor: not-allowed; opacity: .45; }
@@ -250,7 +255,9 @@
 .recovery-metrics .recoverable strong { color: var(--mint); }
 .recovery-metrics .warning strong { color: #ffb86b; }
 .recovery-action-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; }
-.recovery-action-row > span { color: #526278; font-size: 8px; line-height: 1.5; }
+.recovery-action-row > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.recovery-action-row span { color: #526278; font-size: 8px; line-height: 1.5; }
+.recovery-action-row small { color: #a67d54; font-size: 8px; line-height: 1.5; }
 .recovery-action-row button { border-color: rgba(93, 227, 187, .28); color: #76dabb; background: rgba(41, 128, 101, .1); }
 
 .local-ledger { margin: 0 0 16px; overflow: hidden; border: 1px solid #1f2b3b; border-radius: 11px; background: rgba(8, 14, 24, .56); }
@@ -395,6 +402,7 @@ footer b { color: #365048; font-weight: 400; }
   .config-save-row { align-items: flex-start; flex-direction: column; }
   .config-save-row button { width: 100%; }
   .recovery-tool-heading, .recovery-action-row { align-items: stretch; flex-direction: column; }
+  .recovery-scope { grid-template-columns: 1fr; }
   .recovery-metrics { grid-template-columns: 1fr 1fr; }
   .scan-button, .recovery-action-row button { width: 100%; }
   .local-ledger-item { align-items: flex-start; flex-direction: column; }

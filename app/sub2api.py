@@ -392,12 +392,13 @@ async def fetch_sub2api_options(
 
 
 async def fetch_sub2api_401_accounts(
-    *, base_url: str, token: str, verify_tls: bool
+    *, base_url: str, token: str, verify_tls: bool, group_id: int
 ) -> dict[str, Any]:
     headers = _admin_auth_headers(token, user_agent="account-import/0.4")
     page = 1
     page_size = 1000
     scanned = 0
+    other_errors = 0
     candidates: list[dict[str, Any]] = []
     try:
         async with httpx.AsyncClient(
@@ -411,6 +412,7 @@ async def fetch_sub2api_401_accounts(
                         "page": str(page),
                         "page_size": str(page_size),
                         "lite": "true",
+                        "group": str(group_id),
                     },
                 )
                 data = _response_data(response, "读取账号")
@@ -421,7 +423,11 @@ async def fetch_sub2api_401_accounts(
                 items = data["items"]
                 scanned += len(items)
                 for item in items:
-                    if not isinstance(item, dict) or not _account_has_401_state(item):
+                    if not isinstance(item, dict):
+                        continue
+                    if not _account_has_401_state(item):
+                        if item.get("status") == "error":
+                            other_errors += 1
                         continue
                     account_id = item.get("id")
                     if not isinstance(account_id, int):
@@ -449,10 +455,12 @@ async def fetch_sub2api_401_accounts(
 
     recoverable = [item for item in candidates if item["card_code"]]
     return {
+        "group_id": group_id,
         "scanned": scanned,
         "detected_401": len(candidates),
         "recoverable": len(recoverable),
         "missing_card_code": len(candidates) - len(recoverable),
+        "other_errors": other_errors,
         "unique_codes": len({item["card_code"] for item in recoverable}),
         "accounts": candidates,
     }

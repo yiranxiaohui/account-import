@@ -217,48 +217,61 @@ async def test_scans_recorded_401_accounts_and_reads_new_and_legacy_codes(monkey
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/api/v1/admin/accounts")
         assert request.url.params["page_size"] == "1000"
+        assert request.url.params["group"] == "13"
+        page = int(request.url.params["page"])
+        items = [
+            {
+                "id": 1,
+                "name": "owner@example.com",
+                "notes": "RCL-AAAA-BBBB",
+                "platform": "openai",
+                "type": "oauth",
+                "status": "error",
+                "error_message": "Authentication failed (401)",
+            },
+            {
+                "id": 2,
+                "name": "Legacy owner legacy@example.com RCL-CCCC-DDDD",
+                "platform": "openai",
+                "type": "oauth",
+                "status": "active",
+                "error_message": "",
+                "temp_unschedulable_reason": "oauth_401",
+            },
+            {
+                "id": 3,
+                "name": "healthy@example.com",
+                "notes": "RCL-EEEE-FFFF",
+                "platform": "openai",
+                "type": "oauth",
+                "status": "active",
+                "error_message": "",
+            },
+            {
+                "id": 4,
+                "name": "no-code@example.com",
+                "platform": "openai",
+                "type": "oauth",
+                "status": "error",
+                "error_message": "upstream returned 401",
+            },
+        ] if page == 1 else [
+            {
+                "id": 5,
+                "name": "workspace@example.com",
+                "notes": "RCL-GGGG-HHHH",
+                "platform": "openai",
+                "type": "oauth",
+                "status": "error",
+                "error_message": "Workspace deactivated (402)",
+            }
+        ]
         data = {
-            "items": [
-                {
-                    "id": 1,
-                    "name": "owner@example.com",
-                    "notes": "RCL-AAAA-BBBB",
-                    "platform": "openai",
-                    "type": "oauth",
-                    "status": "error",
-                    "error_message": "Authentication failed (401)",
-                },
-                {
-                    "id": 2,
-                    "name": "Legacy owner legacy@example.com RCL-CCCC-DDDD",
-                    "platform": "openai",
-                    "type": "oauth",
-                    "status": "active",
-                    "error_message": "",
-                    "temp_unschedulable_reason": "oauth_401",
-                },
-                {
-                    "id": 3,
-                    "name": "healthy@example.com",
-                    "notes": "RCL-EEEE-FFFF",
-                    "platform": "openai",
-                    "type": "oauth",
-                    "status": "active",
-                    "error_message": "",
-                },
-                {
-                    "id": 4,
-                    "name": "no-code@example.com",
-                    "platform": "openai",
-                    "type": "oauth",
-                    "status": "error",
-                    "error_message": "upstream returned 401",
-                },
-            ],
-            "total": 4,
-            "page": 1,
+            "items": items,
+            "total": 5,
+            "page": page,
             "page_size": 1000,
-            "pages": 1,
+            "pages": 2,
         }
         return httpx.Response(200, json={"code": 0, "data": data})
 
@@ -272,12 +285,15 @@ async def test_scans_recorded_401_accounts_and_reads_new_and_legacy_codes(monkey
         base_url="https://sub2api.example.com",
         token="admin-token",
         verify_tls=True,
+        group_id=13,
     )
 
-    assert result["scanned"] == 4
+    assert result["group_id"] == 13
+    assert result["scanned"] == 5
     assert result["detected_401"] == 3
     assert result["recoverable"] == 2
     assert result["missing_card_code"] == 1
+    assert result["other_errors"] == 1
     assert result["unique_codes"] == 2
     assert result["accounts"][0]["card_code"] == "RCL-AAAA-BBBB"
     assert result["accounts"][1]["card_code"] == "RCL-CCCC-DDDD"

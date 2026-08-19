@@ -131,10 +131,12 @@ class Sub2API401Account(BaseModel):
 
 
 class Sub2API401ScanResponse(BaseModel):
+    group_id: int
     scanned: int
     detected_401: int
     recoverable: int
     missing_card_code: int
+    other_errors: int
     unique_codes: int
     accounts: list[Sub2API401Account] = Field(default_factory=list)
 
@@ -161,6 +163,7 @@ class LocalAccountListResponse(BaseModel):
 
 class StartRecover401JobRequest(BaseModel):
     redeem_base_url: AnyHttpUrl
+    group_id: int = Field(gt=0)
     account_ids: list[int] = Field(min_length=1, max_length=1000)
 
     @field_validator("account_ids")

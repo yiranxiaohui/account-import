@@ -470,6 +470,7 @@ class JobManager:
             "base_url": str(request.sub2api_base_url).rstrip("/"),
             "token": request.sub2api_token.get_secret_value(),
             "verify_tls": request.verify_sub2api_tls,
+            "group_id": request.group_id,
         }
         job.update(
             status="running",
@@ -486,8 +487,10 @@ class JobManager:
         ]
         codes = list(dict.fromkeys(str(account["card_code"]) for account in targets))
         job.summary["scan"] = {
+            "group_id": scan["group_id"],
             "scanned": scan["scanned"],
             "detected_401": scan["detected_401"],
+            "other_errors": scan["other_errors"],
             "selected": len(targets),
             "unique_codes": len(codes),
         }

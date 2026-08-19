@@ -208,11 +208,14 @@ async def test_recovery_job_matches_by_code_and_email_then_updates_in_place(
 ):
     async def fake_scan(**kwargs):
         assert kwargs["token"] == "admin-token"
+        assert kwargs["group_id"] == 13
         return {
+            "group_id": 13,
             "scanned": 2,
             "detected_401": 1,
             "recoverable": 1,
             "missing_card_code": 0,
+            "other_errors": 1,
             "unique_codes": 1,
             "accounts": [
                 {
@@ -243,6 +246,7 @@ async def test_recovery_job_matches_by_code_and_email_then_updates_in_place(
         redeem_base_url="https://redeem.example.com",
         sub2api_base_url="http://sub2api.example.com",
         sub2api_token="admin-token",
+        group_id=13,
         account_ids=[71],
     )
 
@@ -252,6 +256,8 @@ async def test_recovery_job_matches_by_code_and_email_then_updates_in_place(
 
     assert record.status == "succeeded"
     assert record.summary["operation"] == "recover_401"
+    assert record.summary["scan"]["group_id"] == 13
+    assert record.summary["scan"]["other_errors"] == 1
     assert record.summary["recovery"]["updated"] == 1
     assert updated[0]["account_id"] == 71
     assert updated[0]["card_code"] == "RCL-AAAA-BBBB"

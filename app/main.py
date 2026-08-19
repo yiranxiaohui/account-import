@@ -126,13 +126,16 @@ def create_app(
         response_model=Sub2API401ScanResponse,
         tags=["sub2api"],
     )
-    async def scan_sub2api_401_accounts() -> Sub2API401ScanResponse:
+    async def scan_sub2api_401_accounts(
+        group_id: int = Query(gt=0),
+    ) -> Sub2API401ScanResponse:
         try:
             sub2api = persistent_config.require()
             result = await fetch_sub2api_401_accounts(
                 base_url=str(sub2api.base_url).rstrip("/"),
                 token=sub2api.access_token.get_secret_value(),
                 verify_tls=sub2api.verify_tls,
+                group_id=group_id,
             )
             return Sub2API401ScanResponse.model_validate(result)
         except ConfigStoreError as exc:

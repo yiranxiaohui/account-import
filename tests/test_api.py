@@ -210,11 +210,14 @@ async def test_scan_401_endpoint_uses_persisted_sub2api_config(tmp_path, monkeyp
     async def fake_scan(**kwargs):
         assert kwargs["base_url"] == "https://sub2api.example.com"
         assert kwargs["token"] == "admin-token"
+        assert kwargs["group_id"] == 13
         return {
+            "group_id": 13,
             "scanned": 5,
             "detected_401": 1,
             "recoverable": 1,
             "missing_card_code": 0,
+            "other_errors": 2,
             "unique_codes": 1,
             "accounts": [
                 {
@@ -233,11 +236,55 @@ async def test_scan_401_endpoint_uses_persisted_sub2api_config(tmp_path, monkeyp
     monkeypatch.setattr("app.main.fetch_sub2api_401_accounts", fake_scan)
     transport = httpx.ASGITransport(app=create_app(config_store=store))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/api/sub2api/accounts/401")
+        missing_group = await client.get("/api/sub2api/accounts/401")
+        response = await client.get("/api/sub2api/accounts/401?group_id=13")
 
+    assert missing_group.status_code == 422
     assert response.status_code == 200
+    assert response.json()["group_id"] == 13
     assert response.json()["recoverable"] == 1
+    assert response.json()["other_errors"] == 2
     assert response.json()["accounts"][0]["card_code"] == "RCL-AAAA-BBBB"
+
+
+@pytest.mark.asyncio
+async def test_recovery_job_uses_group_selected_for_that_request(
+    tmp_path, monkeypatch
+):
+    store = ConfigStore(tmp_path / "config.json")
+    store.save(
+        Sub2APIConfigUpdate(
+            base_url="https://sub2api.example.com",
+            access_token="admin-token",
+            group_id=7,
+        )
+    )
+    manager = JobManager()
+    captured = {}
+
+    def fake_create(request):
+        captured["request"] = request
+        return JobRecord(id="recovery-job-1")
+
+    monkeypatch.setattr(manager, "create_recovery", fake_create)
+    transport = httpx.ASGITransport(
+        app=create_app(manager=manager, config_store=store)
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/jobs/recover-401",
+            json={
+                "redeem_base_url": "https://redeem.example.com",
+                "group_id": 13,
+                "account_ids": [71],
+            },
+        )
+
+    assert response.status_code == 202
+    request = captured["request"]
+    assert request.group_id == 13
+    assert request.account_ids == [71]
+    assert request.sub2api_token.get_secret_value() == "admin-token"
 
 
 @pytest.mark.asyncio

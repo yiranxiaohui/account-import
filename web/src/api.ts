@@ -72,8 +72,8 @@ export function createManualImportJob(payload: ManualImportJobRequest): Promise<
   })
 }
 
-export function scanSub2API401Accounts(): Promise<Sub2API401Scan> {
-  return request<Sub2API401Scan>('/api/sub2api/accounts/401')
+export function scanSub2API401Accounts(groupId: number): Promise<Sub2API401Scan> {
+  return request<Sub2API401Scan>(`/api/sub2api/accounts/401?group_id=${encodeURIComponent(groupId)}`)
 }
 
 export function createRecover401Job(payload: Recover401JobRequest): Promise<CreateJobResponse> {

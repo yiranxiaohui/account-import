@@ -174,6 +174,7 @@ function App() {
   const [groupOptions, setGroupOptions] = useState<Sub2APIGroupOption[]>([])
   const [proxyOptions, setProxyOptions] = useState<Sub2APIProxyOption[]>([])
   const [loadingOptions, setLoadingOptions] = useState(false)
+  const [recoveryGroupId, setRecoveryGroupId] = useState<number | null>(null)
   const [recoveryScan, setRecoveryScan] = useState<Sub2API401Scan | null>(null)
   const [scanning401, setScanning401] = useState(false)
   const [localAccounts, setLocalAccounts] = useState<LocalAccountList>({ total: 0, items: [] })
@@ -223,6 +224,7 @@ function App() {
         setHasSavedToken(config.has_token)
         setVerifyTls(config.verify_tls)
         setGroupId(config.group_id ?? null)
+        setRecoveryGroupId(config.group_id ?? null)
         setConfigUpdatedAt(config.updated_at || null)
         setConfigDirty(!config.configured)
         if (config.has_token) {
@@ -417,12 +419,16 @@ function App() {
     setActiveView('workspace')
     setTaskMode('recovery')
     setFormError('')
+    if (recoveryGroupId === null) {
+      setFormError('请先选择要扫描的 Sub2API 分组')
+      return
+    }
     setScanning401(true)
     try {
       if (configDirty || token.trim() || !hasSavedToken) {
         await persistSub2APIConfig()
       }
-      const result = await scanSub2API401Accounts()
+      const result = await scanSub2API401Accounts(recoveryGroupId)
       setRecoveryScan(result)
     } catch (error) {
       setFormError(error instanceof Error ? error.message : '扫描 Sub2API 401 账号失败')
@@ -441,6 +447,7 @@ function App() {
       setFormError('当前扫描结果中没有带兑换码的 401 账号')
       return
     }
+    if (!recoveryScan) return
 
     setFormError('')
     setSubmitting(true)
@@ -451,6 +458,7 @@ function App() {
       }
       const result = await createRecover401Job({
         redeem_base_url: compactUrl(redeemBaseUrl),
+        group_id: recoveryScan.group_id,
         account_ids: accountIds,
       })
       setJob(result.job)
@@ -829,11 +837,36 @@ function App() {
                   <span>401 自动找回</span>
                   <small>读取 Sub2API 已记录的 401，按备注中的兑换码原地更新凭据</small>
                 </div>
+              </div>
+              <div className="recovery-scope">
+                <label>
+                  <span>扫描分组</span>
+                  <div className="select-wrap">
+                    <select
+                      value={recoveryGroupId ?? ''}
+                      onChange={(event) => {
+                        setRecoveryGroupId(event.target.value ? Number(event.target.value) : null)
+                        setRecoveryScan(null)
+                      }}
+                      disabled={running || loadingOptions}
+                    >
+                      <option value="">请选择一个分组</option>
+                      {recoveryGroupId !== null && !groupOptions.some((group) => group.id === recoveryGroupId) && (
+                        <option value={recoveryGroupId}>已保存分组 #{recoveryGroupId}（当前列表中不可用）</option>
+                      )}
+                      {groupOptions.map((group) => (
+                        <option value={group.id} key={group.id}>
+                          {group.name}{group.platform ? ` · ${group.platform}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </label>
                 <button
                   type="button"
                   className="scan-button"
                   onClick={handleScan401}
-                  disabled={running || !configLoaded || apiOnline === false}
+                  disabled={running || !configLoaded || loadingOptions || recoveryGroupId === null || apiOnline === false}
                 >
                   {scanning401 ? '扫描中…' : recoveryScan ? '重新扫描' : '扫描 401'}
                 </button>
@@ -841,7 +874,7 @@ function App() {
               {recoveryScan && (
                 <div className="recovery-scan-result">
                   <div className="recovery-metrics">
-                    <span><strong>{recoveryScan.scanned}</strong>账号总数</span>
+                    <span><strong>{recoveryScan.scanned}</strong>分组账号</span>
                     <span><strong>{recoveryScan.detected_401}</strong>检测到 401</span>
                     <span className="recoverable"><strong>{recoveryScan.recoverable}</strong>可自动找回</span>
                     <span className={recoveryScan.missing_card_code ? 'warning' : ''}>
@@ -849,7 +882,12 @@ function App() {
                     </span>
                   </div>
                   <div className="recovery-action-row">
-                    <span>涉及 {recoveryScan.unique_codes} 个兑换码；更新时保留原分组、代理和账号 ID。</span>
+                    <div>
+                      <span>涉及 {recoveryScan.unique_codes} 个兑换码；更新时保留原分组、代理和账号 ID。</span>
+                      {recoveryScan.other_errors > 0 && (
+                        <small>另有 {recoveryScan.other_errors} 个非 401 异常，未纳入自动找回。</small>
+                      )}
+                    </div>
                     <button
                       type="button"
                       onClick={handleRecover401}
